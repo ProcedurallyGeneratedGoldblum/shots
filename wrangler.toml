@@ -12,5 +12,5 @@ bucket_name = "screenshots"
 PUBLIC_BASE = "https://pub-fab1bebe127c40688357758659fe4569.r2.dev"
 
 # Fill these in after creating the Cloudflare Access application (see README).
-ACCESS_TEAM_DOMAIN = "https://YOURTEAM.cloudflareaccess.com"
+ACCESS_TEAM_DOMAIN = "https://sparkling-waterfall-bb57.cloudflareaccess.com"
 ACCESS_AUD = "75ebee63a0e5f1709095802d0165c1fe33bc68b142dd73b4498b239d823aa862"
