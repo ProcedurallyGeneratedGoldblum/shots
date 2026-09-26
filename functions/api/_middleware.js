@@ -24,26 +24,28 @@ async function keys(team) {
   return jwks.keys;
 }
 
+// Returns null if the token is valid, otherwise a short reason (safe to show: no secrets).
 async function verify(token, env) {
   const parts = token.split('.');
-  if (parts.length !== 3) return false;
+  if (parts.length !== 3) return 'token is not a JWT';
   const [h, p, s] = parts;
   const header = json(b64url(h));
   const payload = json(b64url(p));
 
   const jwk = (await keys(env.ACCESS_TEAM_DOMAIN)).find(k => k.kid === header.kid);
-  if (!jwk) return false;
+  if (!jwk) return 'signing key not found at team domain (wrong ACCESS_TEAM_DOMAIN?)';
   const key = await crypto.subtle.importKey(
     'jwk', { kty: jwk.kty, n: jwk.n, e: jwk.e },
     { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
   const ok = await crypto.subtle.verify(
     'RSASSA-PKCS1-v1_5', key, b64url(s), new TextEncoder().encode(`${h}.${p}`));
-  if (!ok) return false;
+  if (!ok) return 'bad signature';
 
   const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-  return aud.includes(env.ACCESS_AUD)
-    && payload.iss === env.ACCESS_TEAM_DOMAIN
-    && payload.exp * 1000 > Date.now();
+  if (!aud.includes(env.ACCESS_AUD)) return `AUD mismatch: token has ${aud.join(', ')}`;
+  if (payload.iss !== env.ACCESS_TEAM_DOMAIN) return `issuer mismatch: token has ${payload.iss}`;
+  if (payload.exp * 1000 <= Date.now()) return 'token expired';
+  return null;
 }
 
 function tokenFrom(request) {
@@ -59,10 +61,12 @@ export async function onRequest({ request, env, next }) {
     return new Response('Access is not configured', { status: 403 });
   }
   const token = tokenFrom(request);
+  if (!token) return new Response('Forbidden: no Access token on the request', { status: 403 });
   try {
-    if (token && await verify(token, env)) return next();
+    const problem = await verify(token, env);
+    if (!problem) return next();
+    return new Response(`Forbidden: ${problem}`, { status: 403 });
   } catch (e) {
-    return new Response('Auth check failed', { status: 403 });
+    return new Response(`Auth check failed: ${e.message}`, { status: 403 });
   }
-  return new Response('Forbidden', { status: 403 });
 }
