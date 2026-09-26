@@ -55,11 +55,16 @@ reach the bucket through an **R2 binding**, so there are no API keys in the code
 ```
 shots/
 ├── public/
-│   └── index.html            The whole gallery: HTML, CSS and JS in one file
+│   ├── index.html            Gallery markup
+│   ├── app.js / app.css      Gallery logic and styles (separate files so the CSP can ban inline code)
+│   └── _headers              Security headers: CSP, frame blocking, nosniff, no-referrer, HSTS
 ├── functions/api/
-│   ├── _middleware.js        Verifies the Cloudflare Access JWT on every /api request
+│   ├── _middleware.js        Verifies the Access JWT, blocks cross-origin writes, hardens responses
 │   ├── list.js               GET  /api/list    → objects, newest first, paginated
 │   └── delete.js             POST /api/delete  → removes one object
+├── tests/api.test.mjs        27 security tests for auth, CSRF and handlers (npm test)
+├── .github/                  CI tests, CodeQL scanning, Dependabot, CODEOWNERS
+├── SECURITY.md               How to report a vulnerability
 └── wrangler.toml             Project name, R2 binding, public URL, Access settings
 ```
 
@@ -137,14 +142,15 @@ Every push to `main` redeploys automatically. 🎉
 | `PUBLIC_BASE` | Variable | Base URL images are served from (no trailing slash) |
 | `ACCESS_TEAM_DOMAIN` | Variable | `https://<team>.cloudflareaccess.com`, where the signing keys are fetched and the `iss` claim is checked |
 | `ACCESS_AUD` | Variable | The Access application's Audience tag, checked against the token's `aud` claim |
-| `DEV_NO_AUTH` | Variable | `true` skips the auth check. **Local development only, never in production** |
+| `DEV_NO_AUTH` | Variable | `true` skips the auth check, **but only for requests to localhost**. It has no effect on the deployed site |
 
 Because `wrangler.toml` is in the repo, it is the source of truth: bindings and variables shown
 in the Pages dashboard are read-only.
 
 ## Local development
 ```bash
-echo DEV_NO_AUTH=true > .dev.vars
+npm test                                   # security tests, no dependencies needed
+echo DEV_NO_AUTH=true > .dev.vars          # only honoured on localhost
 npx wrangler r2 object put screenshots/test.png --file some.png --local
 npx wrangler pages dev
 ```
@@ -178,13 +184,28 @@ so problems are quick to diagnose. If the variables are missing entirely, it fai
 
 **Debugging tip:** open `/api/list` directly in the browser. Its one-line message tells you which layer is failing.
 
-## Security notes
+## Security
 
-- Individual image URLs are **public by design**. Anyone with a link can view that file. Use random
-  file names (ShareX `%ra{12}`) so links can't be guessed or enumerated.
-- Listing and deleting require a valid Access login, verified cryptographically, not by header presence.
-- The R2 token on your PC is scoped to one bucket. If it leaks, revoke it and create a new one; nothing else is affected.
+See [SECURITY.md](SECURITY.md) for how to report a vulnerability. The short version of the design:
+
+| Layer | What it does |
+|---|---|
+| **Cloudflare Access** | Nobody reaches the gallery or API without logging in as an allowed email |
+| **JWT verification** | The API checks the Access token itself: RS256 signature against Access's published keys, plus `aud`, `iss`, `exp` and `nbf`. It fails closed if unconfigured |
+| **CSRF protection** | Writes must come from the site's own origin and be `application/json` |
+| **Content-Security-Policy** | No inline code; scripts, styles and API calls only from the site itself; images only from the bucket; can't be framed |
+| **No secrets in the repo** | The bucket is reached through a binding. The only credential (ShareX's R2 token) lives on the uploading PC, scoped to one bucket |
+| **No dependencies** | Nothing from npm is shipped, so there's no package supply chain to compromise |
+| **CI** | Every push runs the security tests and CodeQL. Actions are pinned to commit SHAs and updated by Dependabot |
+
+**About the values in `wrangler.toml`:** the team domain, AUD tag and r2.dev URL are identifiers, not secrets.
+The team domain and AUD already appear in the login URL that anyone visiting the site is redirected to, and
+the r2.dev URL is in every shared link. Knowing them doesn't get anyone past Access.
+
+**Things to know:**
+- Individual image URLs are **public by design**. Use random file names (ShareX `%ra{12}`) so links can't be guessed.
 - Deleting a file in the gallery removes it from R2, so any link you've shared to it stops working.
+- If you move images to a custom domain, update `PUBLIC_BASE` **and** the image host in `public/_headers`.
 
 ## Ideas for later
 

@@ -1,0 +1,11 @@
+# Keeps the pinned GitHub Actions up to date. Shots has no npm dependencies,
+# so actions are the only thing to watch.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

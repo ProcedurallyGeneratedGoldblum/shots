@@ -1,0 +1,11 @@
+# Security headers for the static gallery (Cloudflare Pages).
+# If you move images to a custom domain, replace the r2.dev host in img-src and media-src.
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://pub-fab1bebe127c40688357758659fe4569.r2.dev; media-src https://pub-fab1bebe127c40688357758659fe4569.r2.dev; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
+  Cross-Origin-Opener-Policy: same-origin
+  Strict-Transport-Security: max-age=31536000
+  X-Robots-Tag: noindex, nofollow

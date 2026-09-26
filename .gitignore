@@ -1,0 +1,16 @@
+# Local secrets and dev overrides: never commit these
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+
+# Wrangler / Node
+.wrangler/
+node_modules/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

@@ -1,0 +1,12 @@
+{
+  "name": "shots",
+  "private": true,
+  "type": "module",
+  "description": "A self-hosted Gyazo replacement: ShareX + Cloudflare R2 + a tiny Pages gallery",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
