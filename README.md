@@ -207,7 +207,7 @@ the r2.dev URL is in every shared link. Knowing them doesn't get anyone past Acc
 - Deleting a file in the gallery removes it from R2, so any link you've shared to it stops working.
 - If you move images to a custom domain, update `PUBLIC_BASE` **and** the image host in `public/_headers`.
 
-## Ideas for later
+## Maybe's
 
 - [ ] **Custom domain** for images (`i.example.com`) instead of the rate-limited r2.dev URL
 - [ ] **Drag-and-drop upload** from the browser, for when I'm not at my ShareX machine
