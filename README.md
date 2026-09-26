@@ -5,9 +5,6 @@
 Press a hotkey, drag a box, and a link is on your clipboard before you've let go of the mouse.
 Every capture lands in storage you own, and a private gallery lets you browse, copy, and delete
 everything you've ever uploaded.
-
-No servers to babysit, no framework, no build step, and for personal use it costs roughly nothing.
-
 ---
 
 ## Why this exists
