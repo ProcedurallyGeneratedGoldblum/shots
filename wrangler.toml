@@ -1,0 +1,16 @@
+name = "shots"
+pages_build_output_dir = "./public"
+compatibility_date = "2026-09-01"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "screenshots"
+
+[vars]
+# Where the images are publicly served from (no trailing slash).
+# Change this if you move to a custom domain.
+PUBLIC_BASE = "https://pub-fab1bebe127c40688357758659fe4569.r2.dev"
+
+# Fill these in after creating the Cloudflare Access application (see README).
+ACCESS_TEAM_DOMAIN = "https://YOURTEAM.cloudflareaccess.com"
+ACCESS_AUD = ""
