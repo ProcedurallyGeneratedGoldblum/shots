@@ -6,11 +6,5 @@ compatibility_date = "2026-09-01"
 binding = "BUCKET"
 bucket_name = "screenshots"
 
-[vars]
-# Where the images are publicly served from (no trailing slash).
-# Change this if you move to a custom domain.
-PUBLIC_BASE = "https://pub-fab1bebe127c40688357758659fe4569.r2.dev"
-
-# Fill these in after creating the Cloudflare Access application (see README).
-ACCESS_TEAM_DOMAIN = "https://sparkling-waterfall-bb57.cloudflareaccess.com"
-ACCESS_AUD = "75ebee63a0e5f1709095802d0165c1fe33bc68b142dd73b4498b239d823aa862"
+# PUBLIC_BASE, ACCESS_TEAM_DOMAIN and ACCESS_AUD are set as encrypted
+# secrets in the Pages dashboard (Settings → Variables and Secrets).
