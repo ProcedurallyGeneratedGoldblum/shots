@@ -21,7 +21,8 @@ Only the latest commit on `main` is supported. That's what is deployed.
 In scope:
 - The gallery page (`public/`) and its security headers
 - The Pages Functions (`functions/api/`), especially the Cloudflare Access token check in `_middleware.js`
-- Anything that would let someone list, read the index of, or delete files without being authorized
+- Anything that would let someone list, read, upload, overwrite or delete files without being authorized
+- The annotation endpoints (`/api/raw`, `/api/upload`), including getting a non-image stored or served as a page
 
 Out of scope:
 - **Individual image URLs being publicly viewable.** That's intentional: it's how share links work.
@@ -36,7 +37,10 @@ Out of scope:
 - **Two layers of auth.** Cloudflare Access gates the site, and the API independently verifies the
   Access JWT (RS256 signature, `aud`, `iss`, `exp`, `nbf`) against Access's published keys.
   It fails closed if not configured.
-- **CSRF protection.** State-changing requests must come from the site's own origin and be `application/json`.
+- **CSRF protection.** State-changing requests must come from the site's own origin and carry the right content type.
+- **Upload validation.** Annotated images must be PNG, JPEG or WebP (checked by their first bytes, not just the header),
+  at most 25 MB, and can only be saved next to, or over, an image that already exists. Replacing keeps the original's
+  file type. Files read back through the API are served as downloads inside a sandbox, so they can never run as a page.
 - **Strict Content-Security-Policy** with no inline scripts or styles, plus `frame-ancestors 'none'`,
   `nosniff` and `no-referrer`.
 - **No runtime dependencies.** No npm packages are shipped, so there's no supply chain to compromise.

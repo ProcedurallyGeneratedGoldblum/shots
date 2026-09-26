@@ -1,5 +1,6 @@
 const VIDEO = /\.(mp4|webm|mov)$/i;
 let items = [], base = '', cursor = null, view = [], current = -1;
+const version = {}; // key -> timestamp, to show a replaced image instead of a cached copy
 
 const $ = id => document.getElementById(id);
 const urlFor = key => base + '/' + key.split('/').map(encodeURIComponent).join('/');
@@ -30,7 +31,7 @@ async function load() {
 }
 
 function media(key, full) {
-  const src = urlFor(key);
+  const src = urlFor(key) + (version[key] ? '?v=' + version[key] : '');
   if (VIDEO.test(key)) {
     const v = document.createElement('video');
     v.src = src; v.preload = 'metadata'; v.playsInline = true;
@@ -75,6 +76,7 @@ function openLb(i) {
   const o = view[i];
   $('lbName').textContent = fileName(o.key) + ' · ' + fmtSize(o.size) + ' · ' + new Date(o.uploaded).toLocaleString();
   $('lbStage').replaceChildren(media(o.key, true));
+  $('lbAnnotate').hidden = VIDEO.test(o.key);
   $('lb').classList.add('open');
 }
 function closeLb() { $('lb').classList.remove('open'); $('lbStage').replaceChildren(); current = -1; }
@@ -83,6 +85,30 @@ $('lbCopy').onclick = async () => {
   try { await navigator.clipboard.writeText(urlFor(view[current].key)); toast('Link copied'); }
   catch { toast('Copy failed'); }
 };
+$('lbAnnotate').onclick = () => {
+  const o = view[current];
+  window.ShotsAnnotate.open(o.key, { onSaved: saved => afterAnnotate(o, saved) });
+};
+
+async function afterAnnotate(original, saved) {
+  if (saved.mode === 'replace') {
+    version[saved.key] = Date.now();
+    Object.assign(original, { size: saved.size });
+  } else {
+    items.unshift({ key: saved.key, size: saved.size, uploaded: saved.uploaded });
+  }
+  $('q').value = '';
+  render();
+  const i = view.findIndex(x => x.key === saved.key);
+  if (i >= 0) openLb(i);
+  try {
+    await navigator.clipboard.writeText(urlFor(saved.key));
+    toast(saved.mode === 'replace' ? 'Original replaced · link copied' : 'Saved as copy · link copied');
+  } catch {
+    toast(saved.mode === 'replace' ? 'Original replaced' : 'Saved as copy');
+  }
+}
+
 $('lbOpen').onclick = () => window.open(urlFor(view[current].key), '_blank', 'noopener');
 $('lbDel').onclick = async () => {
   const o = view[current];

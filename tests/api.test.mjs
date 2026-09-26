@@ -191,3 +191,109 @@ test('list returns objects and the public base', async () => {
   assert.equal(body.objects.length, 2);
   assert.equal(body.cursor, null);
 });
+
+// ---- Annotation: upload and raw ------------------------------------------------
+
+import { onRequestPost as upload } from '../functions/api/upload.js';
+import { onRequestGet as raw } from '../functions/api/raw.js';
+
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+const JPG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46]);
+
+function storeBucket(initial = {}) {
+  const files = new Map(Object.entries(initial).map(([k, v]) => [k, { bytes: v.bytes, type: v.type }]));
+  return {
+    files,
+    async head(k) { return files.has(k) ? { key: k } : null; },
+    async get(k) {
+      const f = files.get(k);
+      if (!f) return null;
+      return {
+        body: f.bytes, httpEtag: '"e"',
+        writeHttpMetadata(h) { h.set('Content-Type', f.type); },
+      };
+    },
+    async put(k, bytes, opts) {
+      files.set(k, { bytes, type: opts.httpMetadata.contentType });
+      return { size: bytes.length, uploaded: new Date() };
+    },
+  };
+}
+
+function up(query, { type = 'image/png', body = PNG } = {}) {
+  return new Request(`${SITE}/api/upload?${query}`, { method: 'POST', headers: { 'Content-Type': type }, body });
+}
+
+test('upload copy: saves a new random key next to the source, original untouched', async () => {
+  const BUCKET = storeBucket({ 'ShareX/2026/09/orig.png': { bytes: PNG, type: 'image/png' } });
+  const r = await upload({ request: up('mode=copy&source=ShareX/2026/09/orig.png'), env: { BUCKET } });
+  assert.equal(r.status, 200);
+  const { key } = await r.json();
+  assert.match(key, /^ShareX\/2026\/09\/[A-Za-z0-9]{12}\.png$/);
+  assert.equal(BUCKET.files.size, 2);
+  assert.equal(BUCKET.files.get(key).type, 'image/png');
+});
+
+test('upload copy of a JPEG gets a .jpg name', async () => {
+  const BUCKET = storeBucket({ 'a.jpg': { bytes: JPG, type: 'image/jpeg' } });
+  const r = await upload({ request: up('mode=copy&source=a.jpg', { type: 'image/jpeg', body: JPG }), env: { BUCKET } });
+  assert.match((await r.json()).key, /^[A-Za-z0-9]{12}\.jpg$/);
+});
+
+test('upload replace: overwrites the same key', async () => {
+  const BUCKET = storeBucket({ 'x/orig.png': { bytes: new Uint8Array([1]), type: 'image/png' } });
+  const r = await upload({ request: up('mode=replace&source=x/orig.png'), env: { BUCKET } });
+  assert.equal(r.status, 200);
+  assert.equal((await r.json()).key, 'x/orig.png');
+  assert.deepEqual([...BUCKET.files.get('x/orig.png').bytes], [...PNG]);
+});
+
+const badUploads = {
+  'unknown mode': [up('mode=nuke&source=a.png'), 400],
+  'missing source': [up('mode=copy'), 400],
+  'source that does not exist': [up('mode=copy&source=nope.png'), 404],
+  'non-image type': [up('mode=copy&source=a.png', { type: 'text/html', body: new TextEncoder().encode('<script>') }), 415],
+  'SVG (can carry scripts)': [up('mode=copy&source=a.png', { type: 'image/svg+xml', body: new TextEncoder().encode('<svg/>') }), 415],
+  'HTML disguised as PNG': [up('mode=copy&source=a.png', { body: new TextEncoder().encode('<html><script>alert(1)</script>') }), 415],
+  'empty body': [up('mode=copy&source=a.png', { body: new Uint8Array() }), 400],
+  'replace with a different type': [up('mode=replace&source=a.png', { type: 'image/jpeg', body: JPG }), 415],
+};
+for (const [name, [request, status]] of Object.entries(badUploads)) {
+  test(`upload rejects: ${name}`, async () => {
+    const BUCKET = storeBucket({ 'a.png': { bytes: PNG, type: 'image/png' } });
+    const before = [...BUCKET.files.keys()];
+    const r = await upload({ request, env: { BUCKET } });
+    assert.equal(r.status, status);
+    assert.deepEqual([...BUCKET.files.keys()], before);
+    assert.equal(BUCKET.files.get('a.png').bytes, PNG);
+  });
+}
+
+test('upload rejects oversized bodies', async () => {
+  const BUCKET = storeBucket({ 'a.png': { bytes: PNG, type: 'image/png' } });
+  const big = new Uint8Array(26 * 1024 * 1024); big.set(PNG);
+  const r = await upload({ request: up('mode=copy&source=a.png', { body: big }), env: { BUCKET } });
+  assert.equal(r.status, 413);
+  assert.equal(BUCKET.files.size, 1);
+});
+
+test('upload from another origin is blocked by the middleware', async () => {
+  const r = await run({ token: sign({}), method: 'POST', origin: 'https://evil.example', url: `${SITE}/api/upload?mode=copy&source=a.png` });
+  assert.equal(r.status, 403);
+  assert.equal(reachedHandler, false);
+});
+
+test('raw returns the file with sandboxing headers', async () => {
+  const BUCKET = storeBucket({ 'a.png': { bytes: PNG, type: 'image/png' } });
+  const r = await raw({ request: new Request(`${SITE}/api/raw?key=a.png`), env: { BUCKET } });
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('Content-Type'), 'image/png');
+  assert.equal(r.headers.get('Content-Disposition'), 'attachment');
+  assert.match(r.headers.get('Content-Security-Policy'), /sandbox/);
+});
+
+test('raw: missing key 400, unknown key 404', async () => {
+  const BUCKET = storeBucket();
+  assert.equal((await raw({ request: new Request(`${SITE}/api/raw`), env: { BUCKET } })).status, 400);
+  assert.equal((await raw({ request: new Request(`${SITE}/api/raw?key=zz.png`), env: { BUCKET } })).status, 404);
+});
