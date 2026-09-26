@@ -1,60 +1,203 @@
-# Shots: a tiny gallery for the R2 screenshot bucket
+# 📸 Shots
 
-No framework and no build step: one HTML page plus two Pages Functions.
+**A self-hosted Gyazo replacement built from ShareX, Cloudflare R2 and about 300 lines of code.**
+
+Press a hotkey, drag a box, and a link is on your clipboard before you've let go of the mouse.
+Every capture lands in storage you own, and a private gallery lets you browse, copy, and delete
+everything you've ever uploaded.
+
+No servers to babysit, no framework, no build step, and for personal use it costs roughly nothing.
+
+---
+
+## Why this exists
+
+Gyazo went offline after a security breach. That was a good prompt to stop renting a place for
+screenshots and own it instead. The goals:
+
+- **Instant links.** Capture → upload → URL in the clipboard, same as before.
+- **My storage, my rules.** Files live in my own R2 bucket and nobody else controls them.
+- **A private gallery.** Browse everything, like Gyazo Pro, but only I can see the index.
+- **Near-zero cost and upkeep.** No homelab dependency, no subscription.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[ShareX<br/>Ctrl + PrtSc] -- S3 API upload --> B[(Cloudflare R2<br/>bucket: screenshots)]
+    B -- public r2.dev link --> C[Anyone you<br/>share a link with]
+    D[You, in a browser] --> E{Cloudflare Access<br/>login gate}
+    E -- signed JWT --> F[Pages site<br/>index.html]
+    F -- /api/list · /api/delete --> G[Pages Functions]
+    G -- R2 binding, no keys --> B
+```
+
+There are two separate paths:
+
+| | Who | How |
+|---|---|---|
+| **Sharing** | Anyone with a link | Individual files are public on the bucket's URL, exactly like a Gyazo link |
+| **Browsing** | Only me | The gallery and its API sit behind Cloudflare Access, and the API also checks the Access token itself |
+
+The gallery page never talks to R2 directly and never holds a credential. The Pages Functions
+reach the bucket through an **R2 binding**, so there are no API keys in the code, the repo, or the browser.
+
+## Features
+
+- 🗂️ Grid of every upload, newest first, grouped by month
+- 🔎 Instant filter by file name
+- 🖼️ Full-size lightbox with ← → keyboard navigation and Esc to close
+- 🎬 Videos (`.mp4`, `.webm`, `.mov`) play inline with a *video* badge on the tile
+- 🔗 One-click **Copy link**, **Open**, and **Delete**
+- 🌓 Light and dark mode that follows your system
+- 📱 Works on phones
+- 📄 Loads 5,000 items at a time, with a *Load more* button beyond that
+
+## What's in the box
 
 ```
-public/index.html            the gallery (grid by month, filter, lightbox, copy link, delete)
-functions/api/_middleware.js only lets requests through that carry a valid Cloudflare Access token
-functions/api/list.js        GET  /api/list    lists the bucket, newest first
-functions/api/delete.js      POST /api/delete  deletes one object
-wrangler.toml                project name, R2 binding, public URL, Access settings
+shots/
+├── public/
+│   └── index.html            The whole gallery: HTML, CSS and JS in one file
+├── functions/api/
+│   ├── _middleware.js        Verifies the Cloudflare Access JWT on every /api request
+│   ├── list.js               GET  /api/list    → objects, newest first, paginated
+│   └── delete.js             POST /api/delete  → removes one object
+└── wrangler.toml             Project name, R2 binding, public URL, Access settings
 ```
 
-Images load directly from your public R2 URL. The functions only return the list and handle deletes.
-The bucket is reached through a binding, so no API keys are stored anywhere.
+## What it costs
 
-## Deploy (about 10 minutes)
+| Piece | Cost |
+|---|---|
+| R2 storage | Free up to 10 GB per month, then about $0.015/GB. Tens of thousands of screenshots fit in the free tier |
+| R2 bandwidth | **Always free.** R2 has no egress fees |
+| Pages hosting + Functions | Free tier |
+| Cloudflare Access | Free plan (up to 50 users) |
+| ShareX | Free and open source |
 
-You need Node.js installed. Run everything from this folder.
+For comparison, Gyazo Pro is about $4–5/month. *Check Cloudflare's current pricing before relying on these numbers; free tiers change.*
 
-**1. Log in and deploy**
-```
-npx wrangler login
-npx wrangler pages deploy
-```
-On the first run, wrangler offers to create a project called `shots` and gives you a URL like
-`https://shots-xxx.pages.dev`. The page will load but say "Not authorized". That's expected:
-the API refuses every request until Access is set up (step 2), so the bucket is never exposed.
+---
 
-**2. Put Cloudflare Access in front of it**
-1. Cloudflare dashboard → **Zero Trust**. The first time, pick a team name and the **Free** plan.
-2. **Access → Applications → Add an application → Self-hosted**.
-3. Domain: your `shots-xxx.pages.dev` hostname. Add a second one, `*.shots-xxx.pages.dev`,
-   so preview deployments are protected too.
-4. Policy: **Allow**, Include → **Emails** → your email address.
-5. Save, then open the application and copy its **Application Audience (AUD) Tag**.
-6. Your team domain is under **Settings → Custom pages** (or shown in the Access login URL):
-   `https://<team>.cloudflareaccess.com`.
+## Setting it up from scratch
 
-**3. Add those two values to `wrangler.toml` and redeploy**
+### 1. R2 bucket
+1. Cloudflare dashboard → **R2** → **Create bucket** → `screenshots` (Standard storage class).
+2. Bucket → **Settings** → enable the **Public Development URL** (`https://pub-….r2.dev`),
+   or better, attach a **Custom Domain**.
+3. **R2 → Manage API tokens** → create a token with **Object Read & Write**, scoped to this bucket only.
+   Save the Access Key ID, the Secret, and the S3 endpoint.
+
+### 2. ShareX
+**Destinations → Destination settings → Amazon S3**
+
+| Field | Value |
+|---|---|
+| Access key ID / Secret | From the R2 token |
+| Endpoint | `<account-id>.r2.cloudflarestorage.com` (hostname only, without `https://` or `/screenshots`) |
+| Region | `auto` |
+| Bucket | `screenshots` |
+| Use path style request | ✅ |
+| Set public-read ACL | ❌ (R2 handles public access at the bucket level) |
+| Custom domain | Your r2.dev or custom domain URL |
+
+Then set **Destinations → Image uploader** and **File uploader** to **Amazon S3**, and in
+**After upload tasks**, tick **Copy URL to clipboard**.
+
+### 3. Deploy the gallery (Pages + GitHub)
+1. Push this repo to GitHub.
+2. Cloudflare → **Workers & Pages → Create → Pages → Import an existing Git repository**.
+   > ⚠️ Make sure you're in the **Pages** flow, not Workers. The Workers flow runs `wrangler deploy` and fails.
+3. Build settings: preset **None**, build command *empty*, output directory **`public`**.
+4. Deploy. Opening the site should say *"Not authorized"*. That's correct: the API refuses everything until Access is configured.
+
+### 4. Lock it down with Cloudflare Access
+1. **Zero Trust → Access → Applications → Add → Self-hosted**
+2. Domains: `your-project.pages.dev` **and** `*.your-project.pages.dev` (the second covers preview deploys).
+3. Policy: **Allow** → Include → **Emails** → your address. *Nothing else. See troubleshooting below.*
+4. Copy the application's **AUD tag** and your **team domain**.
+
+### 5. Configure and push
 ```toml
+# wrangler.toml
+PUBLIC_BASE        = "https://pub-xxxxxxxx.r2.dev"
 ACCESS_TEAM_DOMAIN = "https://<team>.cloudflareaccess.com"
-ACCESS_AUD = "<the AUD tag>"
+ACCESS_AUD         = "<AUD tag>"
 ```
+```bash
+git commit -am "Configure Access" && git push
 ```
-npx wrangler pages deploy
-```
-Open the site. Access asks for your email, sends a one-time code, and after that you see your gallery.
+Every push to `main` redeploys automatically. 🎉
 
-## Changing things later
-- **Custom domain for images:** change `PUBLIC_BASE` in `wrangler.toml` and redeploy.
-  Existing r2.dev links keep working as long as the dev URL stays enabled on the bucket.
-- **Local testing:** create a `.dev.vars` file containing `DEV_NO_AUTH=true`, then run
-  `npx wrangler pages dev`. That uses a simulated local bucket, not your real one.
-  Never set `DEV_NO_AUTH` on the deployed site.
+---
 
-## Notes
-- Individual image links stay public (that's how sharing works). Only browsing the full list and
-  deleting files require your login.
-- Each load fetches up to 5,000 items, and a "Load more" button appears beyond that.
-- Delete removes the file from R2, so any link you've shared to it stops working.
+## Configuration reference
+
+| Name | Kind | Purpose |
+|---|---|---|
+| `BUCKET` | R2 binding | The bucket the API lists and deletes from |
+| `PUBLIC_BASE` | Variable | Base URL images are served from (no trailing slash) |
+| `ACCESS_TEAM_DOMAIN` | Variable | `https://<team>.cloudflareaccess.com`, where the signing keys are fetched and the `iss` claim is checked |
+| `ACCESS_AUD` | Variable | The Access application's Audience tag, checked against the token's `aud` claim |
+| `DEV_NO_AUTH` | Variable | `true` skips the auth check. **Local development only, never in production** |
+
+Because `wrangler.toml` is in the repo, it is the source of truth: bindings and variables shown
+in the Pages dashboard are read-only.
+
+## Local development
+```bash
+echo DEV_NO_AUTH=true > .dev.vars
+npx wrangler r2 object put screenshots/test.png --file some.png --local
+npx wrangler pages dev
+```
+This runs against a **simulated** local bucket, so your real screenshots are never touched.
+
+## How the auth check works
+
+Cloudflare Access puts a signed JWT on every request that passes its gate (the `Cf-Access-Jwt-Assertion`
+header or the `CF_Authorization` cookie). `_middleware.js` doesn't just trust that the header exists. It:
+
+1. Fetches Access's public signing keys from `<team>/cdn-cgi/access/certs` (cached for an hour)
+2. Verifies the RS256 signature with WebCrypto
+3. Checks `aud` matches this application, `iss` matches the team, and the token hasn't expired
+
+If anything fails, it returns `403` with a short, secret-free reason, such as `Forbidden: AUD mismatch`,
+so problems are quick to diagnose. If the variables are missing entirely, it fails **closed**.
+
+---
+
+## Troubleshooting (a.k.a. everything that went wrong on day one)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| ShareX uploads hang forever, with no error | Endpoint entered as a full URL or with the bucket appended | Use the hostname only, region `auto`, path-style on |
+| Upload "succeeds" but nothing appears in R2 | ShareX is sending to a different destination (in my case Flickr, left over from a connection test) | Check the log for `Host: Amazon S3`. Set the Image **and** File uploader to Amazon S3 |
+| Build log shows `wrangler deploy` → *Missing entry-point* | The project was created as a **Worker**, not Pages | Delete it and recreate it via the **Pages** flow |
+| Repo doesn't appear when connecting Git | Cloudflare's GitHub app isn't allowed to see it | GitHub → Settings → Installed GitHub Apps → Cloudflare → add the repo |
+| Access: *"That account does not have access"* | Policy had an extra **Require → Authentication Method: otp** rule. Logging in through the Cloudflare IdP reports no OTP, so the policy fails | Keep only Include → Emails. The Access **Logs** show exactly which rule failed |
+| Gallery says *Not authorized*, `/api/list` says *Access is not configured* | The site is running an old build without the variables. Here the project had silently become **disconnected from Git**, so pushes never deployed | Reconnect Git under Pages → Settings → Build, then push an empty commit |
+| Stuck in a cached "denied" state | Old Access session | Use `https://<team>.cloudflareaccess.com/cdn-cgi/access/logout` or a private window |
+
+**Debugging tip:** open `/api/list` directly in the browser. Its one-line message tells you which layer is failing.
+
+## Security notes
+
+- Individual image URLs are **public by design**. Anyone with a link can view that file. Use random
+  file names (ShareX `%ra{12}`) so links can't be guessed or enumerated.
+- Listing and deleting require a valid Access login, verified cryptographically, not by header presence.
+- The R2 token on your PC is scoped to one bucket. If it leaks, revoke it and create a new one; nothing else is affected.
+- Deleting a file in the gallery removes it from R2, so any link you've shared to it stops working.
+
+## Ideas for later
+
+- [ ] **Custom domain** for images (`i.example.com`) instead of the rate-limited r2.dev URL
+- [ ] **Drag-and-drop upload** from the browser, for when I'm not at my ShareX machine
+- [ ] **OCR search**: run uploads through Workers AI, store the text in D1, and search it
+- [ ] **Albums / tags**
+- [ ] **Expiring links** via an R2 lifecycle rule on a `tmp/` prefix
+- [ ] Thumbnail generation for faster grids on large libraries
+
+---
+
+<sub>Built on a Saturday in September 2026, the day Gyazo went dark. ☁️</sub>
